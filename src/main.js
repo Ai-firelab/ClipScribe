@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { lookup as lookupMime } from 'mime-types';
-import ytdlp from 'yt-dlp-exec';
+import ytdlp from 'youtube-dl-exec';
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));

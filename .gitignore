@@ -1,1 +1,5 @@
 node_modules/
+.env
+apify_storage/
+storage/
+*.mp4
