@@ -1,15 +1,17 @@
 # Debian-based Node image: apt-get is available and yt-dlp's glibc binary runs.
 FROM node:20-slim
 
-# ffmpeg is required by yt-dlp to merge separate video/audio streams.
+# The yt-dlp binary that youtube-dl-exec downloads is the plain release asset:
+# a Python zipapp with a `#!/usr/bin/env python3` shebang, so it needs a system
+# python3 at runtime. ffmpeg is required to merge separate video/audio streams.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 
-# The yt-dlp binary that youtube-dl-exec downloads is self-contained (bundles
-# its own Python), so we skip the package's system-Python preinstall check.
+# Skip youtube-dl-exec's postinstall python check; we install python3 above and
+# the check probes for a `python` (not `python3`) executable which is absent.
 ENV YOUTUBE_DL_SKIP_PYTHON_CHECK=1
 
 # Install dependencies first to leverage Docker layer caching.
