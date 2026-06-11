@@ -32,6 +32,13 @@
       "minimum": 0,
       "maximum": 10,
       "default": 3
+    },
+    "proxyConfiguration": {
+      "title": "Proxy configuration",
+      "type": "object",
+      "description": "Proxy used for the Instagram download. Residential proxy is strongly recommended at scale to avoid being blocked.",
+      "editor": "proxy",
+      "default": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
     }
   },
   "required": ["reelUrl"]
