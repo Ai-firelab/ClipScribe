@@ -8,6 +8,10 @@ RUN apt-get update \
 
 WORKDIR /usr/src/app
 
+# The yt-dlp binary that youtube-dl-exec downloads is self-contained (bundles
+# its own Python), so we skip the package's system-Python preinstall check.
+ENV YOUTUBE_DL_SKIP_PYTHON_CHECK=1
+
 # Install dependencies first to leverage Docker layer caching.
 # youtube-dl-exec downloads the yt-dlp binary during postinstall (needs network).
 COPY package*.json ./
