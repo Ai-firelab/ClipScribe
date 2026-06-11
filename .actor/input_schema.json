@@ -6,32 +6,37 @@
     "reelUrl": {
       "title": "Reel URL",
       "type": "string",
-      "description": "A public Instagram Reel URL"
+      "description": "A public Instagram Reel URL",
+      "editor": "textfield"
     },
     "model": {
       "title": "Gemini model",
       "type": "string",
       "description": "Gemini model used for transcription",
-      "default": "gemini-2.5-flash"
+      "default": "gemini-2.5-flash",
+      "editor": "textfield"
     },
     "languageHint": {
       "title": "Language hint",
       "type": "string",
       "description": "Optional hint like en, hi, auto",
-      "default": "auto"
+      "default": "auto",
+      "editor": "textfield"
     },
     "keepLocalVideo": {
       "title": "Keep local video",
       "type": "boolean",
       "description": "If true, do not delete the downloaded file after processing",
-      "default": false
+      "default": false,
+      "editor": "checkbox"
     },
     "maxRetries": {
       "title": "Max retries",
       "type": "integer",
       "minimum": 0,
       "maximum": 10,
-      "default": 3
+      "default": 3,
+      "editor": "number"
     },
     "proxyConfiguration": {
       "title": "Proxy configuration",
