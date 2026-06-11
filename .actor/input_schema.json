@@ -1,0 +1,38 @@
+{
+  "title": "Instagram Reel Gemini Transcriber",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "reelUrl": {
+      "title": "Reel URL",
+      "type": "string",
+      "description": "A public Instagram Reel URL"
+    },
+    "model": {
+      "title": "Gemini model",
+      "type": "string",
+      "description": "Gemini model used for transcription",
+      "default": "gemini-2.5-flash"
+    },
+    "languageHint": {
+      "title": "Language hint",
+      "type": "string",
+      "description": "Optional hint like en, hi, auto",
+      "default": "auto"
+    },
+    "keepLocalVideo": {
+      "title": "Keep local video",
+      "type": "boolean",
+      "description": "If true, do not delete the downloaded file after processing",
+      "default": false
+    },
+    "maxRetries": {
+      "title": "Max retries",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10,
+      "default": 3
+    }
+  },
+  "required": ["reelUrl"]
+}

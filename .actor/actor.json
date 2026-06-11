@@ -1,0 +1,12 @@
+{
+  "actorSpecification": 1,
+  "name": "instagram-reel-gemini-transcriber",
+  "title": "Instagram Reel Gemini Transcriber",
+  "description": "Downloads Instagram Reels and transcribes them with Gemini",
+  "version": "1.0",
+  "input": "./input_schema.json",
+  "dockerfile": "./Dockerfile",
+  "environmentVariables": {
+    "GEMINI_API_KEY": "@GEMINI_API_KEY"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "instagram-reel-gemini-transcriber",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Apify Actor that downloads Instagram Reels and transcribes them with Gemini",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "apify": "^3.3.0",
+    "mime-types": "^2.1.35",
+    "youtube-dl-exec": "^3.1.7"
+  }
+}
