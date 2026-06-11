@@ -33,6 +33,7 @@
     "maxRetries": {
       "title": "Max retries",
       "type": "integer",
+      "description": "How many times to retry the Instagram download before giving up.",
       "minimum": 0,
       "maximum": 10,
       "default": 3,
