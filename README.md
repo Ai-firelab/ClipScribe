@@ -151,7 +151,7 @@ Once execution completes, the actor saves the structured record to the default d
 
 | Field | Meaning |
 |---|---|
-| `views`, `likes`, `comments`, `followers` | Pulled from the reel's metadata that `yt-dlp` extracts during download. Any value Instagram does not expose for a given reel (common without authentication) is returned as `null`. |
+| `views`, `likes`, `comments`, `followers` | Pulled from the reel's metadata that `yt-dlp` extracts during download. **Instagram requires authentication to expose `view_count` and `channel_follower_count`** — without Instagram account cookies, these come back as `null`. `like_count` and `comment_count` are usually available without auth. See **Cookies** below. |
 | `engagement` / `engagementRate` | `(likes + comments) / views * 100` — how compelling the reel was to the people who watched it. |
 | `engagementRateByFollowers` | `(likes + comments) / followers * 100` — the classic account-level Instagram engagement metric. |
 | `outlierScore` | `this reel's views / the account's median reel views`. `1` ≈ an average reel for the account; `5` means it got ~5x the account's typical views. Requires an **online lookup** of the account's recent reels (see below). |
@@ -160,9 +160,30 @@ Once execution completes, the actor saves the structured record to the default d
 > **Outlier score is best-effort.** Computing it requires fetching a sample of the
 > account's recent reels online to establish a baseline. Instagram rate-limits and
 > often gates unauthenticated profile listings, so the score may come back `null`
-> with a reason in `metrics.outlierBaseline.note`. A residential proxy (and, if you
-> add them, account cookies in `downloadReel`) significantly improves reliability.
-> Disable the lookup entirely with `"computeOutlierScore": false`.
+> with a reason in `metrics.outlierBaseline.note`. A residential proxy and account
+> cookies significantly improve reliability. Disable the lookup entirely with
+> `"computeOutlierScore": false`.
+
+## Cookies
+
+Instagram requires **authentication to expose `view_count` and `channel_follower_count`** in reel metadata. Without cookies, these fields return `null` (though likes and comments are usually visible).
+
+To unlock views and followers:
+
+1. **Extract your Instagram session cookies.** In your browser:
+   - Open [instagram.com](https://instagram.com) and log in to your account.
+   - Open DevTools (F12 / right-click → Inspect).
+   - Go to **Application** → **Cookies** → `instagram.com`.
+   - Export the cookies (most browser DevTools have "Copy all as cURL" or use an extension).
+   - Convert to JSON array format: `[{"name":"sessionid","value":"..."},{"name":"csrftoken","value":"..."},...]`
+
+2. **Pass to the actor:**
+   - In Apify Console, paste the JSON into the `instagramCookiesJson` input field.
+   - Or in your code: `"instagramCookiesJson": "[{\"name\":\"sessionid\",\"value\":\"...\"}]"`
+
+3. **Session rotation:** Instagram may invalidate old cookies. If you see `view_count: null` again after a while, extract fresh cookies.
+
+**Security note:** Never commit cookies to version control. Use Apify secrets or environment variables.
 
 ## License
 

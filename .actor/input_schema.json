@@ -55,6 +55,12 @@
       "default": 12,
       "editor": "number"
     },
+    "instagramCookiesJson": {
+      "title": "Instagram cookies (JSON)",
+      "type": "string",
+      "description": "Optional JSON array of Instagram account cookies to unlock view counts and follower counts. Format: [{\"name\":\"sessionid\",\"value\":\"...\",\"domain\":\".instagram.com\"}]. Without cookies, Instagram hides view_count and channel_follower_count on unauthenticated requests.",
+      "editor": "textarea"
+    },
     "proxyConfiguration": {
       "title": "Proxy configuration",
       "type": "object",
