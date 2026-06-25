@@ -8,6 +8,7 @@ ClipScribe is a production-grade Apify Actor designed to download public Instagr
 ## Features
 
 - **Instagram Reel Downloading**: Robust video retrieval using a built-in `youtube-dl-exec` wrapper.
+- **Performance Metrics**: Returns views, likes, comments, followers, engagement rate, and a relative **outlier score** alongside the transcript.
 - **AI Transcription**: Powered by Google Gemini (default: `gemini-2.5-flash`).
 - **Multimodal Analysis**: Directly uploads the downloaded video to the Gemini File API for transcription.
 - **Language Detection & Hints**: Support for explicit language hints to improve transcription accuracy.
@@ -107,6 +108,30 @@ Once execution completes, the actor saves the structured record to the default d
   "sourceUrl": "<INSTAGRAM_REEL_URL>",
   "model": "gemini-2.5-flash",
   "languageHint": "en",
+  "outlierScore": 4.2,
+  "views": 184523,
+  "likes": 12045,
+  "comments": 321,
+  "followers": 250000,
+  "engagement": 6.7,
+  "metrics": {
+    "outlierScore": 4.2,
+    "views": 184523,
+    "likes": 12045,
+    "comments": 321,
+    "followers": 250000,
+    "engagement": 6.7,
+    "engagementRate": 6.7,
+    "engagementRateByFollowers": 4.95,
+    "interactions": 12366,
+    "uploader": "Example Creator",
+    "username": "examplecreator",
+    "outlierBaseline": {
+      "medianViews": 43800,
+      "sampleSize": 11,
+      "note": null
+    }
+  },
   "localVideo": {
     "path": "/tmp/reel-12345/video.mp4",
     "bytes": 1234567
@@ -121,6 +146,23 @@ Once execution completes, the actor saves the structured record to the default d
   "createdAt": "2026-06-11T20:44:55.000Z"
 }
 ```
+
+### Metrics fields
+
+| Field | Meaning |
+|---|---|
+| `views`, `likes`, `comments`, `followers` | Pulled from the reel's metadata that `yt-dlp` extracts during download. Any value Instagram does not expose for a given reel (common without authentication) is returned as `null`. |
+| `engagement` / `engagementRate` | `(likes + comments) / views * 100` — how compelling the reel was to the people who watched it. |
+| `engagementRateByFollowers` | `(likes + comments) / followers * 100` — the classic account-level Instagram engagement metric. |
+| `outlierScore` | `this reel's views / the account's median reel views`. `1` ≈ an average reel for the account; `5` means it got ~5x the account's typical views. Requires an **online lookup** of the account's recent reels (see below). |
+| `metrics.outlierBaseline` | The median views and sample size used for the outlier score, plus a `note` explaining why the score is `null` when it could not be computed. |
+
+> **Outlier score is best-effort.** Computing it requires fetching a sample of the
+> account's recent reels online to establish a baseline. Instagram rate-limits and
+> often gates unauthenticated profile listings, so the score may come back `null`
+> with a reason in `metrics.outlierBaseline.note`. A residential proxy (and, if you
+> add them, account cookies in `downloadReel`) significantly improves reliability.
+> Disable the lookup entirely with `"computeOutlierScore": false`.
 
 ## License
 

@@ -28,11 +28,139 @@ async function ensureDir(dir) {
     await fs.mkdir(dir, { recursive: true });
 }
 
-/**
- * Return the newest *completed* video file in `dir`, ignoring partial
- * download artifacts and non-video files. Each run uses its own dir, so
- * after a successful merge this reliably resolves to the final video.
- */
+
+function toFiniteNumber(value) {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+
+function median(numbers) {
+    const sorted = numbers.filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+    if (sorted.length === 0) return null;
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+
+function round(value, digits = 4) {
+    if (!Number.isFinite(value)) return null;
+    const factor = 10 ** digits;
+    return Math.round(value * factor) / factor;
+}
+
+
+function deriveUsername(info) {
+    if (!info) return null;
+    if (info.uploader_url) {
+        try {
+            const segment = new URL(info.uploader_url).pathname.split('/').filter(Boolean)[0];
+            if (segment) return segment;
+        } catch {
+            // ignore malformed URL and fall through
+        }
+    }
+    return info.uploader_id || info.channel || info.uploader || null;
+}
+
+function extractStats(info) {
+    if (!info) {
+        return { views: null, likes: null, comments: null, followers: null, uploader: null, username: null };
+    }
+    return {
+        views: toFiniteNumber(info.view_count),
+        likes: toFiniteNumber(info.like_count),
+        comments: toFiniteNumber(info.comment_count),
+        followers: toFiniteNumber(info.channel_follower_count),
+        uploader: info.uploader ?? info.channel ?? null,
+        username: deriveUsername(info),
+    };
+}
+
+
+function computeEngagement({ likes, comments, views, followers }) {
+    const hasInteraction = likes !== null || comments !== null;
+    const interactions = hasInteraction ? (likes ?? 0) + (comments ?? 0) : null;
+    return {
+        interactions,
+        engagementRate: hasInteraction && views ? round((interactions / views) * 100) : null,
+        engagementRateByFollowers: hasInteraction && followers ? round((interactions / followers) * 100) : null,
+    };
+}
+
+async function readReelInfoJson(dir) {
+    try {
+        const items = await fs.readdir(dir);
+        const infoFile = items.find((name) => name.toLowerCase().endsWith('.info.json'));
+        if (!infoFile) return null;
+        const raw = await fs.readFile(path.join(dir, infoFile), 'utf8');
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+
+async function fetchAccountViewCounts({ username, proxyUrl, sampleSize, timeoutMs, excludeId }) {
+    const profileUrl = `https://www.instagram.com/${username}/reels/`;
+    const options = {
+        dumpSingleJson: true,
+        playlistEnd: sampleSize,
+        ignoreErrors: true,
+        socketTimeout: 30,
+        quiet: true,
+        noWarnings: true,
+    };
+    if (proxyUrl) options.proxy = proxyUrl;
+
+    const result = await ytdlp(profileUrl, options, { timeout: timeoutMs });
+    const data = typeof result === 'string' ? JSON.parse(result) : result;
+    const entries = Array.isArray(data?.entries) ? data.entries : data ? [data] : [];
+
+    const views = [];
+    for (const entry of entries) {
+        if (!entry || (excludeId && entry.id === excludeId)) continue;
+        const v = toFiniteNumber(entry.view_count);
+        if (v !== null) views.push(v);
+    }
+    return views;
+}
+
+async function computeOutlierScore({ views, username, proxyUrl, sampleSize, timeoutMs, currentId }) {
+    if (views === null) {
+        return { score: null, baseline: null, sampleSize: 0, reason: 'This reel exposes no view_count to score against.' };
+    }
+    if (!username) {
+        return { score: null, baseline: null, sampleSize: 0, reason: 'Could not determine the account handle for a baseline.' };
+    }
+    try {
+        const sample = await fetchAccountViewCounts({ username, proxyUrl, sampleSize, timeoutMs, excludeId: currentId });
+        const baseline = median(sample);
+        if (!baseline) {
+            return {
+                score: null,
+                baseline: null,
+                sampleSize: sample.length,
+                reason: 'Instagram returned no comparable reels with view counts (often login/rate-limit gated).',
+            };
+        }
+        return {
+            score: round(views / baseline, 2),
+            baseline,
+            sampleSize: sample.length,
+            reason: null,
+        };
+    } catch (err) {
+        return {
+            score: null,
+            baseline: null,
+            sampleSize: 0,
+            reason: `Baseline lookup failed: ${err?.message || err}`,
+        };
+    }
+}
+
+
 async function findNewestVideoFile(dir) {
     const items = await fs.readdir(dir, { withFileTypes: true });
     const files = [];
@@ -52,11 +180,6 @@ async function findNewestVideoFile(dir) {
     return files[0]?.full ?? null;
 }
 
-/**
- * Determine whether an error from the Gemini API is worth retrying:
- * rate limits (429) and transient server errors (5xx) are; everything
- * else (bad request, auth, quota-exceeded-hard) is not.
- */
 function isRetryableGeminiError(err) {
     const status = err?.status ?? err?.code ?? err?.response?.status;
     if (status === 429 || (typeof status === 'number' && status >= 500 && status < 600)) {
@@ -72,9 +195,7 @@ function isRetryableGeminiError(err) {
     );
 }
 
-/**
- * Run a Gemini API call with exponential backoff on transient failures.
- */
+
 async function withGeminiRetry(label, fn, { maxRetries = 4 } = {}) {
     let lastError;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -112,15 +233,12 @@ async function downloadReel({ url, outputDir, maxRetries = 3, proxyUrl, timeoutM
                 socketTimeout: 30,
                 quiet: true,
                 noWarnings: true,
-                // Add cookies later if you need authenticated access:
-                // cookies: '/path/to/cookies.txt'
+                writeInfoJson: true,
             };
             if (proxyUrl) {
                 options.proxy = proxyUrl;
             }
 
-            // youtube-dl-exec uses execa under the hood, so we can bound the
-            // whole download with a hard timeout to avoid hung processes.
             await ytdlp(url, options, { timeout: timeoutMs });
 
             const file = await findNewestVideoFile(outputDir);
@@ -128,7 +246,8 @@ async function downloadReel({ url, outputDir, maxRetries = 3, proxyUrl, timeoutM
                 throw new Error('Download finished, but no output video file was found.');
             }
 
-            return file;
+            const info = await readReelInfoJson(outputDir);
+            return { videoPath: file, info };
         } catch (err) {
             lastError = err;
             if (attempt <= maxRetries) {
@@ -202,6 +321,8 @@ await Actor.main(async () => {
         languageHint = 'auto',
         keepLocalVideo = false,
         maxRetries = 3,
+        computeOutlierScore: shouldComputeOutlier = true,
+        outlierSampleSize = 12,
         proxyConfiguration: proxyInput,
     } = input;
 
@@ -235,7 +356,7 @@ await Actor.main(async () => {
 
     try {
         await Actor.setStatusMessage('Downloading reel video...');
-        const videoPath = await downloadReel({
+        const { videoPath, info } = await downloadReel({
             url: reelUrl,
             outputDir: workDir,
             maxRetries,
@@ -243,6 +364,45 @@ await Actor.main(async () => {
         });
 
         const videoStat = await fs.stat(videoPath);
+
+
+        const stats = extractStats(info);
+        const engagement = computeEngagement(stats);
+
+        let outlier = { score: null, baseline: null, sampleSize: 0, reason: 'Outlier scoring disabled.' };
+        if (shouldComputeOutlier) {
+            await Actor.setStatusMessage('Computing outlier score from the account baseline...');
+            outlier = await computeOutlierScore({
+                views: stats.views,
+                username: stats.username,
+                proxyUrl,
+                sampleSize: outlierSampleSize,
+                timeoutMs: 4 * 60 * 1000,
+                currentId: info?.id,
+            });
+            if (outlier.reason) {
+                log.warning(`Outlier score not computed: ${outlier.reason}`);
+            }
+        }
+
+        const metrics = {
+            outlierScore: outlier.score,
+            views: stats.views,
+            likes: stats.likes,
+            comments: stats.comments,
+            followers: stats.followers,
+            engagement: engagement.engagementRate,
+            engagementRate: engagement.engagementRate,
+            engagementRateByFollowers: engagement.engagementRateByFollowers,
+            interactions: engagement.interactions,
+            uploader: stats.uploader,
+            username: stats.username,
+            outlierBaseline: {
+                medianViews: outlier.baseline,
+                sampleSize: outlier.sampleSize,
+                note: outlier.reason,
+            },
+        };
 
         await Actor.setStatusMessage('Uploading video to Gemini...');
         const ai = new GoogleGenAI({ apiKey });
@@ -260,6 +420,14 @@ await Actor.main(async () => {
             sourceUrl: reelUrl,
             model,
             languageHint,
+            // Convenience top-level fields (also grouped under `metrics`).
+            outlierScore: metrics.outlierScore,
+            views: metrics.views,
+            likes: metrics.likes,
+            comments: metrics.comments,
+            followers: metrics.followers,
+            engagement: metrics.engagement,
+            metrics,
             localVideo: {
                 path: videoPath,
                 bytes: videoStat.size,

@@ -39,6 +39,22 @@
       "default": 3,
       "editor": "number"
     },
+    "computeOutlierScore": {
+      "title": "Compute outlier score",
+      "type": "boolean",
+      "description": "If true, fetch a sample of the account's recent reels online to build a views baseline and compute an outlier score (this reel's views / the account's median views). Best-effort: Instagram may rate-limit unauthenticated profile listings, in which case the score is null with a reason.",
+      "default": true,
+      "editor": "checkbox"
+    },
+    "outlierSampleSize": {
+      "title": "Outlier baseline sample size",
+      "type": "integer",
+      "description": "How many of the account's recent reels to sample when building the outlier baseline. Larger is more stable but slower and more likely to be throttled by Instagram.",
+      "minimum": 3,
+      "maximum": 50,
+      "default": 12,
+      "editor": "number"
+    },
     "proxyConfiguration": {
       "title": "Proxy configuration",
       "type": "object",
