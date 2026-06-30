@@ -61,10 +61,17 @@
       "description": "JSON array of logged-in Instagram cookies. Strongly recommended: Instagram now usually returns an empty media response for logged-out requests, so a valid \"sessionid\" cookie is often required just to download a reel (and is needed to unlock view_count and channel_follower_count). Accepts a minimal list like [{\"name\":\"sessionid\",\"value\":\"...\",\"domain\":\".instagram.com\"}] or a full browser export (Cookie-Editor / EditThisCookie, including expirationDate). Re-export periodically — sessions expire.",
       "editor": "textarea"
     },
+    "instagramScraperActorId": {
+      "title": "Instagram Scraper actor ID",
+      "type": "string",
+      "description": "Apify actor used as the PRIMARY way to fetch the reel's direct video URL and metrics. Defaults to apify/instagram-scraper (RB9HEZitC8hIUXAha), which handles proxies, auth, and extractor upkeep for you. yt-dlp is only used as an automatic fallback if this returns no video.",
+      "default": "RB9HEZitC8hIUXAha",
+      "editor": "textfield"
+    },
     "ytdlpUpdateChannel": {
       "title": "yt-dlp update channel",
       "type": "string",
-      "description": "Which yt-dlp build to self-update to at startup before downloading. 'stable' is the latest tagged release; 'nightly'/'master' track bleeding-edge extractor fixes (use when Instagram just broke and no stable fix is tagged yet); 'none' skips the update and uses the binary baked into the image. Self-update is best-effort and never blocks a run.",
+      "description": "Only used by the yt-dlp FALLBACK path (when the Instagram Scraper returns no video). Which yt-dlp build to self-update to before falling back: 'stable' is the latest tagged release; 'nightly'/'master' track bleeding-edge extractor fixes; 'none' skips the update and uses the binary baked into the image. Self-update is best-effort and never blocks a run.",
       "enum": ["stable", "nightly", "master", "none"],
       "enumTitles": ["Stable (latest release)", "Nightly", "Master", "None (use baked-in binary)"],
       "default": "stable",

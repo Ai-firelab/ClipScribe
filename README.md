@@ -3,11 +3,13 @@
 [![Apify Ready](https://img.shields.io/badge/Apify-Ready-blue)](https://apify.com)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-green)](https://nodejs.org/)
 
-ClipScribe is a production-grade Apify Actor designed to download public Instagram Reels using `youtube-dl-exec` and generate accurate transcripts using Google Gemini's multimodal capabilities. The output is structured as JSON, making it ideal for content research, search engine optimization (SEO), database storage, or analytics workflows.
+ClipScribe is a production-grade Apify Actor that downloads public Instagram Reels and generates accurate transcripts using Google Gemini's multimodal capabilities. The output is structured as JSON, making it ideal for content research, search engine optimization (SEO), database storage, or analytics workflows.
+
+Reels are fetched primarily through Apify's maintained [Instagram Scraper](https://apify.com/apify/instagram-scraper) — it handles proxies, authentication, and extractor upkeep, returning a direct video URL plus metrics. A self-updating `yt-dlp` path is kept as an automatic fallback.
 
 ## Features
 
-- **Instagram Reel Downloading**: Robust video retrieval using a built-in `youtube-dl-exec` wrapper.
+- **Instagram Reel Downloading**: Primary path via the Apify Instagram Scraper actor (proxy/auth handled for you), with an automatic self-updating `yt-dlp` fallback.
 - **Performance Metrics**: Returns views, likes, comments, followers, engagement rate, and a relative **outlier score** alongside the transcript.
 - **AI Transcription**: Powered by Google Gemini (default: `gemini-2.5-flash`).
 - **Multimodal Analysis**: Directly uploads the downloaded video to the Gemini File API for transcription.
@@ -151,7 +153,7 @@ Once execution completes, the actor saves the structured record to the default d
 
 | Field | Meaning |
 |---|---|
-| `views`, `likes`, `comments`, `followers` | Pulled from the reel's metadata that `yt-dlp` extracts during download. **Instagram requires authentication to expose `view_count` and `channel_follower_count`** — without Instagram account cookies, these come back as `null`. `like_count` and `comment_count` are usually available without auth. See **Cookies** below. |
+| `views`, `likes`, `comments`, `followers` | Mapped from the Instagram Scraper item (`videoPlayCount`, `likesCount`, `commentsCount`). `followers` is usually `null` on the primary path — the per-post scrape doesn't carry the account follower count. On the yt-dlp fallback, views/followers need authentication (see **Cookies**). |
 | `engagement` / `engagementRate` | `(likes + comments) / views * 100` — how compelling the reel was to the people who watched it. |
 | `engagementRateByFollowers` | `(likes + comments) / followers * 100` — the classic account-level Instagram engagement metric. |
 | `outlierScore` | `this reel's views / the account's median reel views`. `1` ≈ an average reel for the account; `5` means it got ~5x the account's typical views. Requires an **online lookup** of the account's recent reels (see below). |
@@ -164,9 +166,9 @@ Once execution completes, the actor saves the structured record to the default d
 > cookies significantly improve reliability. Disable the lookup entirely with
 > `"computeOutlierScore": false`.
 
-## Cookies
+## Cookies (yt-dlp fallback only)
 
-As of 2026, Instagram has largely closed off logged-out access. Two things now depend on authentication:
+The primary Apify Instagram Scraper path needs no cookies — it manages its own auth. Cookies only matter when the actor falls back to `yt-dlp`. As of 2026, Instagram has largely closed off logged-out access, so for the fallback path:
 
 - **Downloading at all.** Many reels return an *"Instagram sent an empty media response… use --cookies"* error for logged-out requests. A valid `sessionid` cookie is increasingly required just to fetch the video. The actor detects this error class and tells you when cookies are needed.
 - **Metadata.** `view_count` and `channel_follower_count` are only exposed to authenticated requests; without cookies they come back `null` (though `like_count` / `comment_count` are usually visible).

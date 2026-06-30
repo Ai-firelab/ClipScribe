@@ -7,9 +7,17 @@ import crypto from 'node:crypto';
 import { lookup as lookupMime } from 'mime-types';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import ytdlp from 'youtube-dl-exec';
 
 const execFileAsync = promisify(execFile);
+
+// Apify's maintained Instagram Scraper. It handles proxies/auth/extractor upkeep
+// and returns a direct (short-lived) CDN videoUrl plus metrics, so we no longer
+// fight Instagram's anti-bot defenses ourselves. Overridable via input.
+const DEFAULT_INSTAGRAM_SCRAPER_ID = 'RB9HEZitC8hIUXAha'; // apify/instagram-scraper
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.webm', '.mov', '.m4v']);
 // Partial / intermediate artifacts yt-dlp may leave behind mid-download.
@@ -105,6 +113,98 @@ async function readReelInfoJson(dir) {
     }
 }
 
+// --- Apify Instagram Scraper path -------------------------------------------
+
+// Run the Instagram Scraper actor and return its dataset items. `resultsType:
+// 'posts'` returns each reel/post with a direct videoUrl and metrics.
+async function runInstagramScraper({ scraperId, directUrls, resultsLimit }) {
+    const input = {
+        directUrls,
+        resultsType: 'posts',
+        resultsLimit,
+        addParentData: false,
+    };
+    const run = await Actor.call(scraperId, input);
+    if (!run || run.status !== 'SUCCEEDED') {
+        throw new Error(`Instagram Scraper run did not succeed (status: ${run?.status || 'unknown'}).`);
+    }
+    const dataset = await Actor.openDataset(run.defaultDatasetId);
+    const { items } = await dataset.getData();
+    return Array.isArray(items) ? items : [];
+}
+
+// Map an Instagram Scraper post item onto the yt-dlp-style `info` shape the rest
+// of the pipeline (extractStats / metrics) already understands.
+function reelItemToInfo(item) {
+    const username = item.ownerUsername ?? null;
+    return {
+        id: item.id ?? item.shortCode ?? null,
+        view_count: toFiniteNumber(item.videoPlayCount ?? item.videoViewCount),
+        like_count: toFiniteNumber(item.likesCount),
+        comment_count: toFiniteNumber(item.commentsCount),
+        // The per-post output rarely carries the account follower count; it stays
+        // null unless a parent-data field happens to be present.
+        channel_follower_count: toFiniteNumber(item.ownerFollowersCount ?? item.followersCount),
+        uploader: item.ownerFullName ?? username,
+        channel: item.ownerFullName ?? null,
+        uploader_id: username,
+        uploader_url: username ? `https://www.instagram.com/${username}/` : null,
+        webpage_url: item.url ?? null,
+    };
+}
+
+// Stream a (short-lived) CDN URL straight to disk without buffering the whole
+// file in memory. The signed videoUrl expires within hours, so download promptly.
+async function downloadFileFromUrl(url, destPath, timeoutMs = 5 * 60 * 1000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok || !res.body) {
+            throw new Error(`Video URL returned HTTP ${res.status}`);
+        }
+        await pipeline(Readable.fromWeb(res.body), createWriteStream(destPath));
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function downloadReelViaApify({ url, outputDir, scraperId }) {
+    await ensureDir(outputDir);
+    const items = await runInstagramScraper({ scraperId, directUrls: [url], resultsLimit: 1 });
+    const item = items.find((it) => it && it.videoUrl) || items[0];
+    if (!item) {
+        throw new Error('Instagram Scraper returned no items for this URL.');
+    }
+    if (item.error || item.errorDescription) {
+        throw new Error(`Instagram Scraper error: ${item.errorDescription || item.error}`);
+    }
+    if (!item.videoUrl) {
+        throw new Error('Instagram Scraper item has no videoUrl (the post may not be a video reel).');
+    }
+    const id = item.id || item.shortCode || 'reel';
+    const videoPath = path.join(outputDir, `${id}.mp4`);
+    await downloadFileFromUrl(item.videoUrl, videoPath);
+    return { videoPath, info: reelItemToInfo(item) };
+}
+
+// Outlier baseline via the same scraper: pull the account's recent posts and read
+// each one's play count.
+async function fetchAccountViewCountsViaApify({ scraperId, username, sampleSize, excludeId }) {
+    const items = await runInstagramScraper({
+        scraperId,
+        directUrls: [`https://www.instagram.com/${username}/`],
+        resultsLimit: sampleSize,
+    });
+    const views = [];
+    for (const it of items) {
+        if (!it || (excludeId && it.id === excludeId)) continue;
+        const v = toFiniteNumber(it.videoPlayCount ?? it.videoViewCount);
+        if (v !== null) views.push(v);
+    }
+    return views;
+}
+
 async function fetchAccountViewCounts({ username, proxyUrl, sampleSize, timeoutMs, excludeId }) {
     const profileUrl = `https://www.instagram.com/${username}/reels/`;
     const options = {
@@ -130,7 +230,7 @@ async function fetchAccountViewCounts({ username, proxyUrl, sampleSize, timeoutM
     return views;
 }
 
-async function computeOutlierScore({ views, username, proxyUrl, sampleSize, timeoutMs, currentId }) {
+async function computeOutlierScore({ views, username, proxyUrl, sampleSize, timeoutMs, currentId, scraperId }) {
     if (views === null) {
         return { score: null, baseline: null, sampleSize: 0, reason: 'This reel exposes no view_count to score against.' };
     }
@@ -138,7 +238,13 @@ async function computeOutlierScore({ views, username, proxyUrl, sampleSize, time
         return { score: null, baseline: null, sampleSize: 0, reason: 'Could not determine the account handle for a baseline.' };
     }
     try {
-        const sample = await fetchAccountViewCounts({ username, proxyUrl, sampleSize, timeoutMs, excludeId: currentId });
+        let sample;
+        try {
+            sample = await fetchAccountViewCountsViaApify({ scraperId, username, sampleSize, excludeId: currentId });
+        } catch (apifyErr) {
+            log.warning(`Apify baseline lookup failed (${apifyErr?.message || apifyErr}); trying yt-dlp.`);
+            sample = await fetchAccountViewCounts({ username, proxyUrl, sampleSize, timeoutMs, excludeId: currentId });
+        }
         const baseline = median(sample);
         if (!baseline) {
             return {
@@ -453,8 +559,11 @@ await Actor.main(async () => {
         outlierSampleSize = 12,
         instagramCookiesJson,
         ytdlpUpdateChannel,
+        instagramScraperActorId,
         proxyConfiguration: proxyInput,
     } = input;
+
+    const scraperId = instagramScraperActorId || DEFAULT_INSTAGRAM_SCRAPER_ID;
 
     // API key must come from the secret env var only — never from input,
     // which would be stored in plaintext on the run record.
@@ -467,23 +576,12 @@ await Actor.main(async () => {
         throw new Error('reelUrl must look like a public Instagram Reel URL (https://www.instagram.com/reel/...).');
     }
 
-    // Resolve a proxy URL for the download. Residential proxy is strongly
-    // recommended at scale so Instagram does not block Apify datacenter IPs.
+    // Resolve a proxy URL for the yt-dlp fallback path. The primary Apify Instagram
+    // Scraper handles its own proxying; this only matters if we fall back to yt-dlp.
     let proxyUrl;
     const proxyConfiguration = await Actor.createProxyConfiguration(proxyInput);
     if (proxyConfiguration) {
         proxyUrl = await proxyConfiguration.newUrl();
-        log.info('Using Apify Proxy for the Instagram download.');
-    } else {
-        log.warning('No proxy configured — Instagram may rate-limit or block datacenter IPs at scale.');
-    }
-
-    // Pull the freshest yt-dlp before downloading so we have the latest Instagram
-    // extractor fixes. Best-effort — never blocks the run if the update fails.
-    const updateChannel = getYtDlpUpdateChannel(ytdlpUpdateChannel);
-    if (updateChannel !== 'none') {
-        await Actor.setStatusMessage('Updating yt-dlp to the latest build...');
-        await refreshYtDlpBinary(updateChannel);
     }
 
     const runId = Actor.getEnv().runId || crypto.randomUUID();
@@ -493,14 +591,30 @@ await Actor.main(async () => {
     let geminiFileName;
 
     try {
-        await Actor.setStatusMessage('Downloading reel video...');
-        const { videoPath, info } = await downloadReel({
-            url: reelUrl,
-            outputDir: workDir,
-            maxRetries,
-            proxyUrl,
-            instagramCookiesJson,
-        });
+        // Primary path: Apify's maintained Instagram Scraper (handles proxies/auth
+        // and the extractor upkeep for us). Fall back to the self-updating yt-dlp
+        // path only if the scraper can't deliver this reel.
+        await Actor.setStatusMessage('Scraping reel via the Instagram Scraper...');
+        let videoPath;
+        let info;
+        try {
+            ({ videoPath, info } = await downloadReelViaApify({ url: reelUrl, outputDir: workDir, scraperId }));
+            log.info('Downloaded reel via the Apify Instagram Scraper.');
+        } catch (apifyErr) {
+            log.warning(`Instagram Scraper path failed: ${apifyErr?.message || apifyErr}. Falling back to yt-dlp.`);
+            await Actor.setStatusMessage('Falling back to yt-dlp download...');
+            const updateChannel = getYtDlpUpdateChannel(ytdlpUpdateChannel);
+            if (updateChannel !== 'none') {
+                await refreshYtDlpBinary(updateChannel);
+            }
+            ({ videoPath, info } = await downloadReel({
+                url: reelUrl,
+                outputDir: workDir,
+                maxRetries,
+                proxyUrl,
+                instagramCookiesJson,
+            }));
+        }
 
         const videoStat = await fs.stat(videoPath);
 
@@ -518,6 +632,7 @@ await Actor.main(async () => {
                 sampleSize: outlierSampleSize,
                 timeoutMs: 4 * 60 * 1000,
                 currentId: info?.id,
+                scraperId,
             });
             if (outlier.reason) {
                 log.warning(`Outlier score not computed: ${outlier.reason}`);
