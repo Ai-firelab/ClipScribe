@@ -58,8 +58,17 @@
     "instagramCookiesJson": {
       "title": "Instagram cookies (JSON)",
       "type": "string",
-      "description": "Optional JSON array of Instagram account cookies to unlock view counts and follower counts. Format: [{\"name\":\"sessionid\",\"value\":\"...\",\"domain\":\".instagram.com\"}]. Without cookies, Instagram hides view_count and channel_follower_count on unauthenticated requests.",
+      "description": "JSON array of logged-in Instagram cookies. Strongly recommended: Instagram now usually returns an empty media response for logged-out requests, so a valid \"sessionid\" cookie is often required just to download a reel (and is needed to unlock view_count and channel_follower_count). Accepts a minimal list like [{\"name\":\"sessionid\",\"value\":\"...\",\"domain\":\".instagram.com\"}] or a full browser export (Cookie-Editor / EditThisCookie, including expirationDate). Re-export periodically — sessions expire.",
       "editor": "textarea"
+    },
+    "ytdlpUpdateChannel": {
+      "title": "yt-dlp update channel",
+      "type": "string",
+      "description": "Which yt-dlp build to self-update to at startup before downloading. 'stable' is the latest tagged release; 'nightly'/'master' track bleeding-edge extractor fixes (use when Instagram just broke and no stable fix is tagged yet); 'none' skips the update and uses the binary baked into the image. Self-update is best-effort and never blocks a run.",
+      "enum": ["stable", "nightly", "master", "none"],
+      "enumTitles": ["Stable (latest release)", "Nightly", "Master", "None (use baked-in binary)"],
+      "default": "stable",
+      "editor": "select"
     },
     "proxyConfiguration": {
       "title": "Proxy configuration",

@@ -166,22 +166,34 @@ Once execution completes, the actor saves the structured record to the default d
 
 ## Cookies
 
-Instagram requires **authentication to expose `view_count` and `channel_follower_count`** in reel metadata. Without cookies, these fields return `null` (though likes and comments are usually visible).
+As of 2026, Instagram has largely closed off logged-out access. Two things now depend on authentication:
 
-To unlock views and followers:
+- **Downloading at all.** Many reels return an *"Instagram sent an empty media response… use --cookies"* error for logged-out requests. A valid `sessionid` cookie is increasingly required just to fetch the video. The actor detects this error class and tells you when cookies are needed.
+- **Metadata.** `view_count` and `channel_follower_count` are only exposed to authenticated requests; without cookies they come back `null` (though `like_count` / `comment_count` are usually visible).
+
+> **Pair cookies with a residential proxy.** Datacenter IPs are blocked quickly. The default
+> `proxyConfiguration` already requests the Apify `RESIDENTIAL` group.
+
+To authenticate:
 
 1. **Extract your Instagram session cookies.** In your browser:
    - Open [instagram.com](https://instagram.com) and log in to your account.
    - Open DevTools (F12 / right-click → Inspect).
    - Go to **Application** → **Cookies** → `instagram.com`.
-   - Export the cookies (most browser DevTools have "Copy all as cURL" or use an extension).
-   - Convert to JSON array format: `[{"name":"sessionid","value":"..."},{"name":"csrftoken","value":"..."},...]`
+   - Export the cookies. Easiest is a browser extension like **Cookie-Editor** or **EditThisCookie** → "Export as JSON"; the actor accepts that full shape (including `expirationDate`, `domain`, `path`). A minimal `[{"name":"sessionid","value":"..."}]` list also works.
 
 2. **Pass to the actor:**
    - In Apify Console, paste the JSON into the `instagramCookiesJson` input field.
    - Or in your code: `"instagramCookiesJson": "[{\"name\":\"sessionid\",\"value\":\"...\"}]"`
 
-3. **Session rotation:** Instagram may invalidate old cookies. If you see `view_count: null` again after a while, extract fresh cookies.
+3. **Session rotation:** Instagram invalidates sessions over time. If downloads start failing or `view_count` goes `null` again, re-export fresh cookies while logged in.
+
+## Keeping yt-dlp current
+
+The actor downloads Instagram via the `yt-dlp` binary. Instagram's extractor breaks every few weeks and yt-dlp ships fixes constantly, so a binary frozen into the Docker image goes stale. Two mechanisms keep it fresh:
+
+- **Runtime self-update (default).** Before each download the actor self-updates the binary (`yt-dlp -U`), best-effort with a 90s timeout — a failed update never blocks the run. Control it with the `ytdlpUpdateChannel` input: `stable` (default), `nightly`/`master` (bleeding-edge extractor fixes, useful right after Instagram breaks), or `none` to use the baked-in binary. The resolved version is logged each run.
+- **Build-time.** The image ships the self-contained `yt-dlp_linux` build (no system Python, and it supports self-update). Rebuild — or bump the `CACHEBUST` build arg — to pull a fresh binary at build time too.
 
 **Security note:** Never commit cookies to version control. Use Apify secrets or environment variables.
 
